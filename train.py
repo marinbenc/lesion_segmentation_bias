@@ -15,6 +15,9 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 import torch.optim as optim
 from monai.losses.dice import DiceLoss
+from torcheval.metrics.functional.classification import multiclass_f1_score
+
+from functools import partial
 
 import data.datasets as data
 from data.stratified_sampler import StratifiedSampler
@@ -86,22 +89,32 @@ def train(*,
 
     dataset_args_valid = {
         'subset': 'valid',
-        'augment': False,
-        # If using skin-color-tinted images, then the validation should be on color images.
-        # Otherwise if 'white', then the validation should be on white-balanced images.
-        'colorspace': 'rgb' if colorspace == 'white' and augment_skin_color else colorspace,
-        'augment_skin_color': False,
-        'stratified_sample_skin_color_augmentation': stratified_sample_skin_color_augmentation,
-        'skin_color_detection_method': skin_color_detection_method
+        'augment': True,
+        'colorspace': colorspace,
     }
 
     dataset_args_train = {
         **dataset_args_valid,
         'subset': 'train',
         'augment': True,
-        'augment_skin_color': augment_skin_color,
     }
-    
+
+    if model_type == 'lesion_seg':
+        dataset_args_valid = {
+            **dataset_args_valid,
+            # If using skin-color-tinted images, then the validation should be on color images.
+            # Otherwise if 'white', then the validation should be on white-balanced images.
+            'colorspace': 'rgb' if colorspace == 'white' and augment_skin_color else colorspace,
+            'augment_skin_color': False,
+            'stratified_sample_skin_color_augmentation': stratified_sample_skin_color_augmentation,
+            'skin_color_detection_method': skin_color_detection_method
+        }
+
+        dataset_args_train = {
+            **dataset_args_train,
+            'augment_skin_color': augment_skin_color
+        }
+
     dataset_class = data.get_dataset_class(dataset)
 
     if folds == 1:
@@ -180,17 +193,28 @@ def train(*,
             def loss(pred, target):
                 target_seg = target['seg']
                 return dice_loss(pred, target_seg)
+            validation_fn = loss
         elif model_type == 'skin_detection':
-            loss = nn.BCEWithLogitsLoss()
+            labels = train_dataset.labels_df['label'].to_numpy()
+            pos_weight_0 = 1.
+            pos_weight_1 = len(labels) / ((labels == 34) | (labels == 56)).sum()
+            pos_weight_2 = len(labels) / (labels == 56).sum()
+            pos_weight = torch.tensor([pos_weight_0, pos_weight_1, pos_weight_2])
+            pos_weight = pos_weight.to(device)
+            print(f'Pos weight: {pos_weight}')
+            loss = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+            validation_fn = loss
+
         else:
             raise ValueError(f'Unknown model type: {model_type}')
 
         model = get_model(model_type, log_dir, train_dataset, device, fold)
+        #model = torch.compile(model) # TODO: Figure out torch saving with compiled models
         
         optimizer = optim.Adam(model.parameters(), lr=lr)
         scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.1, patience=3, verbose=True, min_lr=1e-15, eps=1e-15)
         
-        trainer = Trainer(model, optimizer, loss, train_loader, valid_loader, 
+        trainer = Trainer(model, optimizer, loss, train_loader, valid_loader, validation_fn=validation_fn,
                           log_dir=log_dir, checkpoint_name=f'{model_type}_best_fold={fold}.pth', scheduler=scheduler)
         trainer.train(epochs)
 

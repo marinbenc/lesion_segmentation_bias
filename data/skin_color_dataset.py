@@ -10,6 +10,8 @@ import albumentations as A
 from albumentations.pytorch import ToTensorV2
 import cv2 as cv
 
+from torchvision.models import ResNet18_Weights
+
 import os
 
 class SkinColorDetectionDataset(torch.utils.data.Dataset):
@@ -68,6 +70,7 @@ class SkinColorDetectionDataset(torch.utils.data.Dataset):
     self.colorspace = colorspace
     self.all_classes = [12, 34, 56]
     self.augment = augment
+    self.model_transforms = ResNet18_Weights.DEFAULT.transforms()
 
     assert self.colorspace in ['lab', 'rgb']
 
@@ -82,18 +85,40 @@ class SkinColorDetectionDataset(torch.utils.data.Dataset):
     file_paths = np.array(self._get_files(directories))
     file_subjects = [self._get_subject_from_file_name(f) for f in file_paths]
     
-    self.labels_df = pd.read_csv(p.join(self.dataset_folder, 'labels.csv'))
+    this_file_dir = p.dirname(__file__)
+    self.labels_df = pd.read_csv(
+      p.join(this_file_dir, self.dataset_folder, 'labels.csv'), 
+      dtype={'label': int, 'file_name': str})
     # Keep only the subjects that are in directories
     self.labels_df = self.labels_df[self.labels_df['file_name'].isin(file_subjects)]
 
     # Append the file paths to the labels dataframe
-    df_subject_names = self.labels_df['file_name'].as_numpy()
+    df_subject_names = self.labels_df['file_name'].to_numpy()
     self.labels_df['file_path'] = file_paths[np.argsort(df_subject_names)]
+
+    labels_remapping = {
+        1: 12,
+        2: 12,
+        3: 34,
+        4: 34,
+        5: 56,
+        6: 56
+    }
+
+    # Remap the labels to the classes
+    if self.labels_df.iloc[0]['label'] in [1, 2, 3, 4, 5, 6]:
+        self.labels_df['label'] = self.labels_df['label'].map(labels_remapping)
 
     if subjects is not None:
         # TODO: Check if this is working
         self.labels_df = self.labels_df[self.labels_df['file_name'].isin(subjects)]
     self.labels_df.sort_values(by=['file_name'], inplace=True)
+
+    self.subjects = self.labels_df['file_name'].to_numpy()
+    self.subject_id_for_idx = self.subjects
+
+    #plt.hist(self.labels_df['label'], bins=3)
+    #plt.show()
 
     # TODO: classes is not used here
     
@@ -115,12 +140,13 @@ class SkinColorDetectionDataset(torch.utils.data.Dataset):
     return A.Compose([
       #A.RandomGamma(p=0.7, gamma_limit=(80, 180)),
       #A.ColorJitter(p=0.5, brightness=0.1, contrast=0.1, saturation=0.1, hue=0.05),
-      A.Flip(p=0.4),
+      A.Flip(p=0.5),
       A.ShiftScaleRotate(p=0.4, rotate_limit=90, scale_limit=0.1, shift_limit=0.1, border_mode=cv.BORDER_CONSTANT, value=0, rotate_method='ellipse'),
-      A.GridDistortion(p=0.4, border_mode=cv.BORDER_CONSTANT, value=0)
+      #A.GridDistortion(p=0.4, border_mode=cv.BORDER_CONSTANT, value=0)
     ])
   
   def __len__(self):
+    #return 64
     return len(self.labels_df)
   
   def get_item_np(self, idx, augmentation=None):
@@ -143,28 +169,53 @@ class SkinColorDetectionDataset(torch.utils.data.Dataset):
 
     return input
 
+#   def label_to_class(self, label):
+#     class_vector = np.zeros(len(self.all_classes))
+#     # Ordinal encoding of the classes
+#     if label == 12:
+#         class_vector[0] = 1
+#     elif label == 34:
+#         class_vector[0, 1] = 1
+#     elif label == 56:
+#         class_vector[0, 1, 2] = 1
+#     return class_vector
+  
   def __getitem__(self, idx):
     input = self.get_item_np(idx, augmentation=self.get_train_augmentation() if self.augment else None)
-    to_tensor = ToTensorV2()
     input = input.astype(np.float32)
-    input = input / 255.
     
-    input_tensor = to_tensor(image=input.transpose(1, 2, 0)).values()
+    #input_tensor = to_tensor(image=input.transpose(1, 2, 0))['image']
+    input_tensor = torch.from_numpy(input)
     input_tensor = input_tensor.float()
-    label_tensor = label_tensor.unsqueeze(0).float()
 
-    # one-hot encoding
-    class_label = self.labels_df.iloc[idx]['label']
-    class_index = self.all_classes.index(class_label)
-    class_label_tensor = torch.zeros(len(self.all_classes))
-    class_label_tensor[class_index] = 1
+    # # skin color thresholding
+    # 0.0 <= (r-g)/(r+g) <= 0.5
+    rg_ratio = (input_tensor[0] - input_tensor[1]) / (input_tensor[0] + input_tensor[1] + 1e-6)
+    # b / (r+g) <= 0.5
+    b_ratio = input_tensor[2] / (input_tensor[0] + input_tensor[1] + 1e-6)
+    skin_mask = (rg_ratio >= 0.0) & (rg_ratio <= 0.5) & (b_ratio <= 0.5)
+    input_tensor[0][~skin_mask] = 0.0
+    input_tensor[1][~skin_mask] = 0.0
+    input_tensor[2][~skin_mask] = 0.0
 
-    #plt.imshow(input.transpose(1, 2, 0))
-    #plt.show()
-    #plt.imshow(input.transpose(1, 2, 0)[:,:,[3,4,5]])
-    #plt.show()
+    # imagenet normalization
+    input_tensor = input_tensor / 255.0
+    input_tensor = input_tensor - torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
+    input_tensor = input_tensor / torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
 
-    return input_tensor, class_label_tensor
+    class_idx = self.labels_df.iloc[idx]['label']
+    class_idx = self.all_classes.index(class_idx)
+    class_idx = torch.tensor(class_idx).long()
+
+    class_tensor_ordinal = torch.zeros(len(self.all_classes)).float()
+    class_tensor_ordinal[:class_idx+1] = 1
+
+    # plt.imshow(input.transpose(1, 2, 0) / 255.0)
+    # file_name = self.labels_df.iloc[idx]['file_name']
+    # plt.title(f"{file_name} - {self.labels_df.iloc[idx]['label']}")
+    # plt.show()
+
+    return input_tensor, class_tensor_ordinal
   
 def FP17KDataset(**kwargs) -> SkinColorDetectionDataset:
   return SkinColorDetectionDataset(dataset_folder='fp17k', **kwargs)

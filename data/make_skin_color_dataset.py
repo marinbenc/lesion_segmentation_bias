@@ -114,12 +114,11 @@ def make_fp17k():
     metadata_df = metadata_df[metadata_df['url'].notna()]
 
     labels_df = pd.DataFrame()
-
     centaur = metadata_df['fitzpatrick_centaur'].to_numpy()
     scale = metadata_df['fitzpatrick_scale'].to_numpy()
-    # Use centaur if available, otherwise use scale
+    # Use centaur labels if available, otherwise use scale
     labels_df['label'] = np.select([centaur > -1, scale > -1], [centaur, scale], default=-1)
-    labels_df['file_name'] = metadata_df['md5hash']
+    labels_df['file_name'] = metadata_df['md5hash'].to_numpy()    
     labels_df = labels_df[labels_df['label'] > -1]
     labels_df['label'] = labels_df['label'].astype(int)
     os.makedirs('fp17k', exist_ok=True)
@@ -164,5 +163,5 @@ def make_diverse():
 
 if __name__ == '__main__':
     #make_pad_ufes()
-    #make_fp17k()
-    make_diverse()
+    make_fp17k()
+    #make_diverse()

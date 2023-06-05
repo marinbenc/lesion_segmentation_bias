@@ -26,7 +26,7 @@ def save_checkpoint(name, log_dir, model, epoch, optimizer, loss):
     }, file_name)
 
 class Trainer:
-  def __init__(self, model, optimizer, loss_fn, train_loader, val_loader, log_dir, checkpoint_name, scheduler=None, device='cuda'):
+  def __init__(self, model, optimizer, loss_fn, train_loader, val_loader, validation_fn, log_dir, checkpoint_name, scheduler=None, device='cuda'):
     self.model = model
     self.optimizer = optimizer
     self.loss_fn = loss_fn
@@ -37,6 +37,7 @@ class Trainer:
     self.checkpoint_name = checkpoint_name
     self.scheduler = scheduler
     self.device = device
+    self.validation_fn = validation_fn
 
     self.writer = SummaryWriter(log_dir=self.log_dir)
     self.best_loss = float('inf')
@@ -75,8 +76,13 @@ class Trainer:
       input = self._to_device(self.get_input(batch))
       target = self._to_device(self.get_target(batch))
 
+      #print(input.shape)
+      #print(target.shape)
+      #print(target)
+
       self.optimizer.zero_grad()
       output = self.model(input)
+      #print(output.shape)
       loss = self.loss_fn(output, target)
       loss.backward()
       self.optimizer.step()
@@ -97,7 +103,7 @@ class Trainer:
           input = self._to_device(self.get_input(batch))
           target = self._to_device(self.get_target(batch))
           output = self.model(input)
-          loss = self.loss_fn(output, target)
+          loss = self.validation_fn(output, target)
           loss_total += loss.item()
       loss_total /= len(self.val_loader)
       self.writer.add_scalar('Loss/valid', loss_total, epoch)
