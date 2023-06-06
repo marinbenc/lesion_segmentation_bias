@@ -196,13 +196,23 @@ def train(*,
             validation_fn = loss
         elif model_type == 'skin_detection':
             labels = train_dataset.labels_df['label'].to_numpy()
-            pos_weight_0 = 1.
-            pos_weight_1 = len(labels) / ((labels == 34) | (labels == 56)).sum()
-            pos_weight_2 = len(labels) / (labels == 56).sum()
-            pos_weight = torch.tensor([pos_weight_0, pos_weight_1, pos_weight_2])
-            pos_weight = pos_weight.to(device)
-            print(f'Pos weight: {pos_weight}')
-            loss = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+            weights = np.zeros(3)
+            for i in range(len(weights)):
+                # Because we use encoding e.g. 2 = [1, 1, 0], for class 1 the positives
+                # are when the label is either 12 or 23.
+                class_names = train_dataset.all_classes[:3 - i]
+                positives = np.sum([np.sum(labels == name) for name in class_names])
+                negatives = len(labels) - positives
+                weights[i] = negatives / positives
+            
+            # because the first element is always 1 ([1, 0, 0], [1, 1, 0], [1, 1, 1])
+            # the calculated weight is 0, therefore add 0.5 to the weights
+            weights += 0.1
+            weights = weights / np.sum(weights)
+            pos_weight = torch.tensor(weights).to(device)
+            print(f'Using pos_weight: {pos_weight}')
+
+            loss = nn.BCEWithLogitsLoss()
             validation_fn = loss
 
         else:

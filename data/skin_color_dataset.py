@@ -105,9 +105,13 @@ class SkinColorDetectionDataset(torch.utils.data.Dataset):
         6: 56
     }
 
+    print(self.labels_df.iloc[:10]['label'])
+
     # Remap the labels to the classes
     if self.labels_df.iloc[0]['label'] in [1, 2, 3, 4, 5, 6]:
         self.labels_df['label'] = self.labels_df['label'].map(labels_remapping)
+
+    print(self.labels_df.iloc[:10]['label'])
 
     if subjects is not None:
         # TODO: Check if this is working

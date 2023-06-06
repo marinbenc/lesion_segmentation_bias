@@ -49,25 +49,22 @@ def get_det_predictions(model, dataset, viz=True):
 
       data = data.to(device)
       output = model(data)
-      output = sigmoid(output)
-      output = output > 0.5
+      output_ = sigmoid(output)
+      output = output_ > 0.5
 
       output_np = np.zeros(output.shape[0])
       # (index of first 0) - 1, e.g. [1, 1, 0] => 1 (class 1)
       for batch in range(output.shape[0]):
-        class_12 = [True, False, False]
-        class_34 = [True, True, False]
-        class_56 = [True, True, True]
-
         output_batch = output[batch].detach().cpu().numpy()
-        if np.array_equal(output_batch, class_12):
-            output_np[batch] = 0
-        elif np.array_equal(output_batch, class_34):
-            output_np[batch] = 1
-        elif np.array_equal(output_batch, class_56):
+        if output_batch[2] == True:
             output_np[batch] = 2
+        elif output_batch[1] == True:
+            output_np[batch] = 1
+        elif output_batch[0] == True:
+            output_np[batch] = 0
         else:
             output_np[batch] = -1
+           
 
       ys_pred += [o for o in output_np]
 
@@ -185,6 +182,11 @@ def test(model_type, dataset, log_name, dataset_folder='valid', save_predictions
     #  df = df.groupby('subject').mean()
 
     #print(df.describe())
+
+    cm = confusion_matrix(ys, ys_pred)
+    print(cm)
+
+    print('accuracy:', cm.diagonal() / cm.sum(axis=1))
 
     print(classification_report(ys, ys_pred, target_names=['12', '34', '56']))
     #return df

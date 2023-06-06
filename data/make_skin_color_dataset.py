@@ -108,7 +108,7 @@ def make_fp17k():
     current_dir = p.dirname(p.realpath(__file__))
     fp17k_dir = current_dir + '/downloaded_data/fp17k'
     print(' Downloading images...')
-    download_fp17k_images()
+    #download_fp17k_images()
 
     metadata_df = pd.read_csv(fp17k_dir + '/fitzpatrick17k.csv')
     metadata_df = metadata_df[metadata_df['url'].notna()]
@@ -116,18 +116,23 @@ def make_fp17k():
     labels_df = pd.DataFrame()
     centaur = metadata_df['fitzpatrick_centaur'].to_numpy()
     scale = metadata_df['fitzpatrick_scale'].to_numpy()
-    # Use centaur labels if available, otherwise use scale
-    labels_df['label'] = np.select([centaur > -1, scale > -1], [centaur, scale], default=-1)
-    labels_df['file_name'] = metadata_df['md5hash'].to_numpy()    
-    labels_df = labels_df[labels_df['label'] > -1]
+
+    #centaur[centaur == -1] = scale[centaur == -1]
+    #scale[scale == -1] = centaur[scale == -1]
+    labels_df['label'] = centaur
     labels_df['label'] = labels_df['label'].astype(int)
+    labels_df['file_name'] = metadata_df['md5hash'].to_numpy()
+    labels_df = labels_df[(centaur != -1) & (scale != -1)]
+    
+    #labels_df = labels_df[labels_df['label'] > -1]
+    #labels_df['label'] = labels_df['label'].astype(int)
     os.makedirs('fp17k', exist_ok=True)
 
     image_download_dir = current_dir + '/downloaded_data/fp17k/images/*'
     images = glob(image_download_dir)
     images.sort()
 
-    copy_train_valid_test_images(images, [0.8, 0.1, 0.1], current_dir + '/fp17k')
+    #copy_train_valid_test_images(images, [0.8, 0.1, 0.1], current_dir + '/fp17k')
 
     print(' Removing corrupted images from labels...')
     copied_images = glob(current_dir + '/fp17k/**/*/*.jpg', recursive=True)
