@@ -209,7 +209,7 @@ def train(*,
             # the calculated weight is 0, therefore add 0.5 to the weights
             weights += 0.1
             weights = weights / np.sum(weights)
-            pos_weight = torch.tensor(weights).to(device)
+            pos_weight = torch.tensor([1, 2, 8]).to(device)
             print(f'Using pos_weight: {pos_weight}')
 
             loss = nn.BCEWithLogitsLoss()

@@ -117,15 +117,13 @@ def make_fp17k():
     centaur = metadata_df['fitzpatrick_centaur'].to_numpy()
     scale = metadata_df['fitzpatrick_scale'].to_numpy()
 
-    #centaur[centaur == -1] = scale[centaur == -1]
-    #scale[scale == -1] = centaur[scale == -1]
     labels_df['label'] = centaur
     labels_df['label'] = labels_df['label'].astype(int)
     labels_df['file_name'] = metadata_df['md5hash'].to_numpy()
-    labels_df = labels_df[(centaur != -1) & (scale != -1)]
+    # only keep labels where centaur and scale agree
+    # this removes uncertain labels
+    labels_df = labels_df[(centaur > -1) & (centaur == scale)]
     
-    #labels_df = labels_df[labels_df['label'] > -1]
-    #labels_df['label'] = labels_df['label'].astype(int)
     os.makedirs('fp17k', exist_ok=True)
 
     image_download_dir = current_dir + '/downloaded_data/fp17k/images/*'
