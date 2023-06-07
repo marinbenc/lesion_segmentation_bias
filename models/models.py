@@ -16,7 +16,12 @@ def get_detection_model(dataset, device, checkpoint=None) -> torch.nn.Module:
     model = resnet18(weights=ResNet18_Weights.IMAGENET1K_V1)
     num_features = model.fc.in_features
     num_classes = len(dataset.all_classes)
-    model.fc = torch.nn.Linear(num_features, num_classes)
+    if dataset.label_encoding == 'class' or dataset.label_encoding == 'ordinal-2d':
+        model.fc = torch.nn.Linear(num_features, num_classes)
+    elif dataset.label_encoding == 'ordinal-1d':
+        model.fc = torch.nn.Linear(num_features, 1)
+    else:
+        raise ValueError(f'Unknown label encoding: {dataset.label_encoding}')
     model = model.to(device)
     if checkpoint is not None:
         saved_model = torch.load(checkpoint)

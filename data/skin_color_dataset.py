@@ -53,6 +53,8 @@ class SkinColorDetectionDataset(torch.utils.data.Dataset):
       The colorspace to use.
     classes (List[int]): 
       A list of classes (12, 34, 56) to use. If None, all classes are used. Useful for training only on a subset of the classes.
+    label_encoding ('class', 'ordinal-2d' or 'ordinal-1d'):
+      The label encoding to use. 'class' is [0, 1, 2], 'ordinal-2d' is [[1,0,0], [1,1,0], [1,1,1]], and 'ordinal-1d' is [1/6, 3/6, 5/6]
 
     Attributes:
       subjects (set[str]): Names of the subjects in the dataset.
@@ -65,12 +67,14 @@ class SkinColorDetectionDataset(torch.utils.data.Dataset):
                subjects: Optional[List[str]] = None, 
                augment = False, 
                colorspace: Literal['lab', 'rgb']='lab', 
-               classes: List[int] = [12, 34, 56]):
+               classes: List[int] = [12, 34, 56],
+               label_encoding: Literal['class', 'ordinal-2d', 'ordinal-1d'] = 'ordinal-1d'):
     self.dataset_folder = dataset_folder
     self.colorspace = colorspace
     self.all_classes = [12, 34, 56]
     self.augment = augment
     self.model_transforms = ResNet18_Weights.DEFAULT.transforms()
+    self.label_encoding = label_encoding
 
     assert self.colorspace in ['lab', 'rgb']
 
@@ -144,8 +148,8 @@ class SkinColorDetectionDataset(torch.utils.data.Dataset):
     return A.Compose([
       #A.RandomGamma(p=0.7, gamma_limit=(80, 180)),
       #A.ColorJitter(p=0.5, brightness=0.1, contrast=0.1, saturation=0.1, hue=0.05),
-      A.Flip(p=0.5),
-      A.ShiftScaleRotate(p=0.4, rotate_limit=90, scale_limit=0.1, shift_limit=0.1, border_mode=cv.BORDER_CONSTANT, value=0, rotate_method='ellipse'),
+      #A.Flip(p=0.5),
+      #A.ShiftScaleRotate(p=0.4, rotate_limit=90, scale_limit=0.1, shift_limit=0.1, border_mode=cv.BORDER_CONSTANT, value=0, rotate_method='ellipse'),
       #A.GridDistortion(p=0.4, border_mode=cv.BORDER_CONSTANT, value=0)
     ])
   
@@ -192,15 +196,15 @@ class SkinColorDetectionDataset(torch.utils.data.Dataset):
     input_tensor = torch.from_numpy(input)
     input_tensor = input_tensor.float()
 
-    # # skin color thresholding
-    # 0.0 <= (r-g)/(r+g) <= 0.5
-    rg_ratio = (input_tensor[0] - input_tensor[1]) / (input_tensor[0] + input_tensor[1] + 1e-6)
-    # b / (r+g) <= 0.5
-    b_ratio = input_tensor[2] / (input_tensor[0] + input_tensor[1] + 1e-6)
-    skin_mask = (rg_ratio >= 0.0) & (rg_ratio <= 0.5) & (b_ratio <= 0.5)
-    input_tensor[0][~skin_mask] = 0.0
-    input_tensor[1][~skin_mask] = 0.0
-    input_tensor[2][~skin_mask] = 0.0
+    # # # skin color thresholding
+    # # 0.0 <= (r-g)/(r+g) <= 0.5
+    # rg_ratio = (input_tensor[0] - input_tensor[1]) / (input_tensor[0] + input_tensor[1] + 1e-6)
+    # # b / (r+g) <= 0.5
+    # b_ratio = input_tensor[2] / (input_tensor[0] + input_tensor[1] + 1e-6)
+    # skin_mask = (rg_ratio >= 0.0) & (rg_ratio <= 0.5) & (b_ratio <= 0.5)
+    # input_tensor[0][~skin_mask] = 0.0
+    # input_tensor[1][~skin_mask] = 0.0
+    # input_tensor[2][~skin_mask] = 0.0
 
     # imagenet normalization
     input_tensor = input_tensor / 255.0
@@ -211,15 +215,31 @@ class SkinColorDetectionDataset(torch.utils.data.Dataset):
     class_idx = self.all_classes.index(class_idx)
     class_idx = torch.tensor(class_idx).long()
 
-    class_tensor_ordinal = torch.zeros(len(self.all_classes)).float()
-    class_tensor_ordinal[:class_idx+1] = 1
 
+    if self.label_encoding == 'ordinal-2d':
+        class_tensor = torch.zeros(len(self.all_classes)).float()
+        class_tensor[:class_idx+1] = 1
+    elif self.label_encoding == 'ordinal-1d':
+        if class_idx == 0:
+            class_tensor = torch.tensor(1/6.).float()
+        elif class_idx == 1:
+            class_tensor = torch.tensor(3/6.).float()
+        elif class_idx == 2:
+            class_tensor = torch.tensor(5/6.).float()
+        else:
+            raise Exception('Invalid class index')
+        class_tensor = class_tensor.unsqueeze(0)
+    elif self.label_encoding == 'class':
+        class_tensor = torch.tensor(class_idx).long()
+    else:
+        raise Exception('Invalid label encoding')
+    
     # plt.imshow(input.transpose(1, 2, 0) / 255.0)
     # file_name = self.labels_df.iloc[idx]['file_name']
     # plt.title(f"{file_name} - {self.labels_df.iloc[idx]['label']}")
     # plt.show()
 
-    return input_tensor, class_tensor_ordinal
+    return input_tensor, class_tensor
   
 def FP17KDataset(**kwargs) -> SkinColorDetectionDataset:
   return SkinColorDetectionDataset(dataset_folder='fp17k', **kwargs)

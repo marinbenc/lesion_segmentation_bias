@@ -41,29 +41,39 @@ def get_det_predictions(model, dataset, viz=True):
   with torch.no_grad():
     for (data, target) in tqdm(loader):
       x_np = data.squeeze(1).detach().cpu().numpy()
-      y_np = target.detach().cpu().numpy().astype(np.int8)
-      y_np = y_np.sum(axis=1) - 1
-      y_np = [y for y in y_np]
-      ys += [y for y in y_np]
       xs += [x for x in x_np]
 
       data = data.to(device)
       output = model(data)
-      output_ = sigmoid(output)
-      output = output_ > 0.5
 
-      output_np = np.zeros(output.shape[0])
-      # (index of first 0) - 1, e.g. [1, 1, 0] => 1 (class 1)
-      for batch in range(output.shape[0]):
-        output_batch = output[batch].detach().cpu().numpy()
-        if output_batch[2] == True:
-            output_np[batch] = 2
-        elif output_batch[1] == True:
-            output_np[batch] = 1
-        elif output_batch[0] == True:
-            output_np[batch] = 0
-        else:
-            output_np[batch] = -1
+      if dataset.label_encoding == 'ordinal-2d':
+        y_np = target.detach().cpu().numpy().astype(np.int8)
+        y_np = y_np.sum(axis=1) - 1
+        y_np = [y for y in y_np]
+        ys += [y for y in y_np]
+
+        output_ = sigmoid(output)
+        output = output_ > 0.5
+
+        output_np = np.zeros(output.shape[0])
+        # (index of first 0) - 1, e.g. [1, 1, 0] => 1 (class 1)
+        for batch in range(output.shape[0]):
+          output_batch = output[batch].detach().cpu().numpy()
+          if output_batch[2] == True:
+              output_np[batch] = 2
+          elif output_batch[1] == True:
+              output_np[batch] = 1
+          elif output_batch[0] == True:
+              output_np[batch] = 0
+          else:
+              output_np[batch] = -1
+      elif dataset.label_encoding == 'ordinal-1d':
+        y_np = target.squeeze(1).detach().cpu().numpy()
+        y_np = np.digitize(y_np, bins=[2/6., 4/6.])
+        ys += [y for y in y_np]
+        output_np = output.squeeze(1).detach().cpu().numpy()
+        output_np = np.digitize(output_np, bins=[2/6., 4/6.])
+      print('output_np:', output_np)
            
 
       ys_pred += [o for o in output_np]
@@ -130,11 +140,12 @@ def calculate_metrics(ys_pred, ys, metrics, subjects=None):
   
   return df
 
-def test(model_type, dataset, log_name, dataset_folder='valid', save_predictions=False, viz=False):
+def test(model_type, dataset, log_name, dataset_folder='valid', save_predictions=False, viz=False, label_encoding='ordinal-2d'):
     dataset_args = {
-       'subset': dataset_folder,
-       'augment': False,
-       'colorspace': 'rgb',
+      'subset': dataset_folder,
+      'augment': False,
+      'colorspace': 'rgb',
+      'label_encoding': label_encoding,
        # TODO: Use saved command line arguments / config file saved in train.py
     }
     test_dataset = data.get_dataset_class(dataset)(**dataset_args)

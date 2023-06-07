@@ -62,7 +62,8 @@ def train(*,
     stratified_sampling: bool = False,
     stratified_sample_skin_color_augmentation: bool = False,
     overwrite: bool = False,
-    workers: int = 8):
+    workers: int = 8,
+    label_encoding: Literal['ordinal-2d', 'ordinal-1d', 'class'] = 'ordinal-2d',):
     """
     Train a detection or segmentation model. 
     
@@ -80,6 +81,8 @@ def train(*,
         log_name (str): The name of the log directory. The model checkpoints are saved in runs/log-name/model-type.
         device (str): The device to train on.
         overwrite (bool): If True, the log_name directory is deleted before training.
+        workers (int): The number of workers to use for data loading.
+        label_encoding ('ordinal-2d', 'ordinal-1d', 'class'): The type of label encoding to use. See data/skin_color_dataset.py for details.
     """
     def worker_init(worker_id):
         np.random.seed(2022 + worker_id)
@@ -91,6 +94,7 @@ def train(*,
         'subset': 'valid',
         'augment': True,
         'colorspace': colorspace,
+        'label_encoding': label_encoding,
     }
 
     dataset_args_train = {
@@ -195,24 +199,16 @@ def train(*,
                 return dice_loss(pred, target_seg)
             validation_fn = loss
         elif model_type == 'skin_detection':
-            labels = train_dataset.labels_df['label'].to_numpy()
-            weights = np.zeros(3)
-            for i in range(len(weights)):
-                # Because we use encoding e.g. 2 = [1, 1, 0], for class 1 the positives
-                # are when the label is either 12 or 23.
-                class_names = train_dataset.all_classes[:3 - i]
-                positives = np.sum([np.sum(labels == name) for name in class_names])
-                negatives = len(labels) - positives
-                weights[i] = negatives / positives
-            
-            # because the first element is always 1 ([1, 0, 0], [1, 1, 0], [1, 1, 1])
-            # the calculated weight is 0, therefore add 0.5 to the weights
-            weights += 0.1
-            weights = weights / np.sum(weights)
-            pos_weight = torch.tensor([1, 2, 8]).to(device)
-            print(f'Using pos_weight: {pos_weight}')
-
-            loss = nn.BCEWithLogitsLoss()
+            if train_dataset.label_encoding == 'ordinal-2d':
+                pos_weight = torch.tensor([1, 2, 4]).to(device)
+                print(f'Using pos_weight: {pos_weight}')
+                loss = nn.BCEWithLogitsLoss()
+            elif train_dataset.label_encoding == 'ordinal-1d':
+                loss = nn.MSELoss()
+            elif train_dataset.label_encoding == 'class':
+                loss = nn.CrossEntropyLoss()
+            else:
+                raise ValueError(f'Unknown label encoding: {train_dataset.label_encoding}')
             validation_fn = loss
 
         else:
