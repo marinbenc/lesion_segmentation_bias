@@ -37,11 +37,20 @@ def get_model(
     log_dir: str, 
     dataset: DatasetType, 
     device: str, 
-    fold: int) -> nn.Module:
+    fold: int,
+    pretrained_model=None,) -> nn.Module:
+
+    checkpoint = None
+    if pretrained_model is not None:
+        pretrained_dir = '/'.join(log_dir.split('/')[2:])
+        pretrained_dir = p.join('runs', pretrained_model, pretrained_dir)
+        checkpoint = p.join(pretrained_dir, f'{model_type}_best_fold={fold}.pth')
+        print('Loading checkpoint from:', checkpoint)
+    
     if model_type == 'lesion_seg':
-        model = models.get_segmentation_model(dataset, device)
+        model = models.get_segmentation_model(dataset, device, checkpoint)
     elif model_type == 'skin_detection':
-        model = models.get_detection_model(dataset, device)
+        model = models.get_detection_model(dataset, device, checkpoint)
     else:
         raise ValueError(f'Unknown model type: {model_type}')
 
@@ -63,7 +72,8 @@ def train(*,
     stratified_sample_skin_color_augmentation: bool = False,
     overwrite: bool = False,
     workers: int = 8,
-    label_encoding: Literal['ordinal-2d', 'ordinal-1d', 'class'] = 'ordinal-2d',):
+    label_encoding: Literal['ordinal-2d', 'ordinal-1d', 'class'] = 'ordinal-2d',
+    pretrained_model: Optional[str] = None,):
     """
     Train a detection or segmentation model. 
     
@@ -83,6 +93,7 @@ def train(*,
         overwrite (bool): If True, the log_name directory is deleted before training.
         workers (int): The number of workers to use for data loading.
         label_encoding ('ordinal-2d', 'ordinal-1d', 'class'): The type of label encoding to use. See data/skin_color_dataset.py for details.
+        pretrained_model (str): The log_name of a pretrained model to initialize the model with.
     """
     def worker_init(worker_id):
         np.random.seed(2022 + worker_id)
@@ -121,7 +132,7 @@ def train(*,
 
     dataset_class = data.get_dataset_class(dataset)
 
-    if folds == 1:
+    if folds == 0:
         train_dataset = dataset_class(**dataset_args_train)
         valid_dataset = dataset_class(**dataset_args_valid)
         datasets.append((train_dataset, valid_dataset))
@@ -162,9 +173,10 @@ def train(*,
             train_dataset = dataset_class(**whole_args_train, subjects=train_ids)
             valid_dataset = dataset_class(**whole_args_valid, subjects=valid_ids)
             # check for data leakage
-            intersection = set(train_dataset.file_names).intersection(set(valid_dataset.file_names))
+            intersection = set(train_dataset.labels_df['file_name'].values).intersection(set(valid_dataset.labels_df['file_name'].values))
             assert len(intersection) == 0, f'Found {len(intersection)} overlapping files in fold {fold}'
-
+            datasets.append((train_dataset, valid_dataset))
+    
     os.makedirs(name=f'runs/{log_name}/{model_type}', exist_ok=True)
     if command_string and command_string is not None:
         command_file = p.join('runs', log_name, model_type, 'command.sh')
@@ -185,9 +197,8 @@ def train(*,
 
         if stratified_sampling:
             train_sampler = StratifiedSampler(train_dataset)
-            valid_sampler = StratifiedSampler(valid_dataset)
             train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=False, worker_init_fn=worker_init, num_workers=workers, sampler=train_sampler)
-            valid_loader = DataLoader(valid_dataset, worker_init_fn=worker_init, num_workers=workers, sampler=valid_sampler)
+            valid_loader = DataLoader(valid_dataset, worker_init_fn=worker_init, num_workers=workers)
         else:
             train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, worker_init_fn=worker_init, num_workers=workers)
             valid_loader = DataLoader(valid_dataset, worker_init_fn=worker_init, num_workers=workers)
@@ -206,7 +217,10 @@ def train(*,
             elif train_dataset.label_encoding == 'ordinal-1d':
                 loss = nn.MSELoss()
             elif train_dataset.label_encoding == 'class':
-                loss = nn.CrossEntropyLoss()
+                classes = train_dataset.all_classes
+                labels = train_dataset.labels_df['label'].values
+                class_weights = torch.tensor([1 / (labels == c).sum() for c in classes]).float().to(device)
+                loss = nn.CrossEntropyLoss(weight=class_weights)
             else:
                 raise ValueError(f'Unknown label encoding: {train_dataset.label_encoding}')
             validation_fn = loss
@@ -214,7 +228,7 @@ def train(*,
         else:
             raise ValueError(f'Unknown model type: {model_type}')
 
-        model = get_model(model_type, log_dir, train_dataset, device, fold)
+        model = get_model(model_type, log_dir, train_dataset, device, fold, pretrained_model)
         #model = torch.compile(model) # TODO: Figure out torch saving with compiled models
         
         optimizer = optim.Adam(model.parameters(), lr=lr)

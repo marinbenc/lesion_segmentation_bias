@@ -1,5 +1,6 @@
 import numpy as np
-import argparse
+import json
+from glob import glob
 import torch
 from torch.nn.functional import softmax, sigmoid
 import cv2 as cv
@@ -20,7 +21,8 @@ import utils
 import data.datasets as data
 import models.models as models
 
-from sklearn.metrics import roc_auc_score, roc_curve, precision_recall_curve, average_precision_score, f1_score, accuracy_score, classification_report, confusion_matrix
+from sklearn.metrics import (roc_auc_score, roc_curve, precision_recall_curve, average_precision_score, 
+                            f1_score, accuracy_score, classification_report, confusion_matrix, balanced_accuracy_score)
 
 device = 'cuda'
 
@@ -73,8 +75,11 @@ def get_det_predictions(model, dataset, viz=True):
         ys += [y for y in y_np]
         output_np = output.squeeze(1).detach().cpu().numpy()
         output_np = np.digitize(output_np, bins=[2/6., 4/6.])
-      print('output_np:', output_np)
-           
+      elif dataset.label_encoding == 'class':
+        y_np = target.detach().cpu().numpy()
+        ys += [y for y in y_np]
+        output_np = output.squeeze(1).detach().cpu().numpy()
+        output_np = np.argmax(output_np, axis=1)           
 
       ys_pred += [o for o in output_np]
 
@@ -141,35 +146,50 @@ def calculate_metrics(ys_pred, ys, metrics, subjects=None):
   return df
 
 def test(model_type, dataset, log_name, dataset_folder='valid', save_predictions=False, viz=False, label_encoding='ordinal-2d'):
-    dataset_args = {
-      'subset': dataset_folder,
-      'augment': False,
-      'colorspace': 'rgb',
-      'label_encoding': label_encoding,
-       # TODO: Use saved command line arguments / config file saved in train.py
-    }
-    test_dataset = data.get_dataset_class(dataset)(**dataset_args)
+    data_split = p.join(p.join('runs', log_name, 'subjects.json'))
+    with open(data_split, 'r') as f:
+      json_dict = json.load(f)
+      splits = zip(json_dict['train_subjects'], json_dict['valid_subjects'])
 
-    if model_type == 'skin_detection':
-        model = models.get_detection_model(test_dataset, device)
-    elif model_type == 'lesion_seg':
-        model = models.get_segmentation_model(test_dataset, device)
-    else:
-        raise ValueError(f'Unknown model type: {model_type}')
+    ys, ys_pred = [], []
 
-    checkpoint = get_checkpoint(model_type, log_name)
-    model.load_state_dict(checkpoint['model'])
+    for fold, split in enumerate(splits):
+      valid_subjects = split[1]
+      dataset_args = {
+        'subset': 'all',
+        'augment': False,
+        'colorspace': 'rgb',
+        'label_encoding': label_encoding,
+        # TODO: Use saved command line arguments / config file saved in train.py
+      }
 
-    os.makedirs(p.join('predictions', log_name), exist_ok=True)
+      test_dataset = data.get_dataset_class(dataset)(**dataset_args, subjects=valid_subjects)
 
-    if model_type == 'skin_detection':
-        xs, ys, ys_pred = get_det_predictions(model, test_dataset, viz=viz)
-    elif model_type == 'lesion_seg': 
-        xs, ys, ys_pred = get_seg_predictions(model, test_dataset, viz=viz)
+      if model_type == 'skin_detection':
+          model = models.get_detection_model(test_dataset, device)
+      elif model_type == 'lesion_seg':
+          model = models.get_segmentation_model(test_dataset, device)
+      else:
+          raise ValueError(f'Unknown model type: {model_type}')
 
-        if save_predictions:
-            for i in range(len(ys_pred)):
-                cv.imwrite(p.join('predictions', log_name, f'{i}.png'), ys_pred[i] * 255)
+      checkpoint = get_checkpoint(model_type, log_name, fold)
+      model.load_state_dict(checkpoint['model'])
+
+      os.makedirs(p.join('predictions', log_name), exist_ok=True)
+
+      if model_type == 'skin_detection':
+          xs, ys_fold, ys_pred_fold = get_det_predictions(model, test_dataset, viz=viz)
+      elif model_type == 'lesion_seg': 
+          xs, ys_fold, ys_pred_fold = get_seg_predictions(model, test_dataset, viz=viz)
+
+          if save_predictions:
+              for i in range(len(ys_pred_fold)):
+                  cv.imwrite(p.join('predictions', log_name, f'{i}.png'), ys_pred_fold[i] * 255)
+      else:
+          raise ValueError(f'Unknown model type: {model_type}')
+
+      ys += list(ys_fold)
+      ys_pred += list(ys_pred_fold)
         
     metrics_seg = {
         'dsc': utils.dsc,
@@ -197,7 +217,8 @@ def test(model_type, dataset, log_name, dataset_folder='valid', save_predictions
     cm = confusion_matrix(ys, ys_pred)
     print(cm)
 
-    print('accuracy:', cm.diagonal() / cm.sum(axis=1))
+    # balanced accuracy
+    print('balanced accuracy:', balanced_accuracy_score(ys, ys_pred))
 
     print(classification_report(ys, ys_pred, target_names=['12', '34', '56']))
     #return df

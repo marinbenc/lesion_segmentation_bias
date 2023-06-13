@@ -59,12 +59,14 @@ def make_pad_ufes():
 
     save_dir = current_dir + '/pad_ufes'
     os.makedirs(save_dir, exist_ok=True)
-
-    labels_df = pd.DataFrame({'file_name': dataset_metadata['img_id'], 'label': dataset_metadata['fitspatrick'].astype(int)})
+    # fitspatrick [sic]
+    labels_df = pd.DataFrame({
+        'file_name': dataset_metadata['img_id'].str.replace('.png', ''), 
+        'label': dataset_metadata['fitspatrick'].astype(int)})
     labels_df.to_csv(p.join(save_dir, 'labels.csv'), index=False)
 
     # Remove images with missing labels
-    images = [i for i in images if p.basename(i) in labels_df['file_name'].values]
+    images = [i for i in images if p.basename(i) in (labels_df['file_name'] + '.png').values]
 
     splits = [0.8, 0.1, 0.1]
     copy_train_valid_test_images(images, splits, save_dir)
@@ -117,6 +119,9 @@ def make_fp17k():
     centaur = metadata_df['fitzpatrick_centaur'].to_numpy()
     scale = metadata_df['fitzpatrick_scale'].to_numpy()
 
+    labels_diag = metadata_df['three_partition_label']
+    labels_df['label_diag'] = labels_diag
+
     labels_df['label'] = centaur
     labels_df['label'] = labels_df['label'].astype(int)
     labels_df['file_name'] = metadata_df['md5hash'].to_numpy()
@@ -165,6 +170,6 @@ def make_diverse():
     copy_train_valid_test_images(images, splits, save_dir)
 
 if __name__ == '__main__':
-    #make_pad_ufes()
-    make_fp17k()
+    make_pad_ufes()
+    #make_fp17k()
     #make_diverse()

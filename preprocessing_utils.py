@@ -1,4 +1,5 @@
 import warnings
+from typing import Optional, Tuple, Literal
 
 import cv2 as cv
 import numpy as np
@@ -46,16 +47,23 @@ def equalize_hist(img, white_point_color):
     img = cv.cvtColor(img_lab, cv.COLOR_LAB2RGB)
     return img
 
-def shade_of_gray_cc(img, power=6, gamma=None):
+def shade_of_gray_cc(img: np.ndarray, power: float = 6, gamma: Optional[float] = None) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
-    img (numpy array): the original image with format of (h, w, c)
-    power (int): the degree of norm, 6 is used in reference paper
-    gamma (float): the value of gamma correction, 2.2 is used in reference paper
+    Color constancy algorithm based on Shades of Gray method.
     based on: https://www.kaggle.com/code/apacheco/shades-of-gray-color-constancy
     C. Barata, M. E. Celebi and J. S. Marques, 
     "Improving Dermoscopy Image Classification Using Color Constancy," 
     in IEEE Journal of Biomedical and Health Informatics, vol. 19, no. 3, pp. 1146-1152, May 2015, 
     doi: 10.1109/JBHI.2014.2336473.
+
+    Args:
+        img (numpy array): the original image with format of (h, w, c)
+        power (int): the degree of norm, 6 is used in reference paper
+        gamma (float): the value of gamma correction, 2.2 is used in reference paper
+    Returns:
+        img: img after color constancy
+        rgb_vec: illuminant applied to img
+        color: the estimated skin color in rgb
     """
     if gamma is not None:
         img = img.astype('uint8')

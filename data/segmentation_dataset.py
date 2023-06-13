@@ -1,5 +1,6 @@
 import os.path as p
 from typing import List, Tuple, Dict, Callable, Optional, Literal
+from pathlib import Path
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -75,10 +76,8 @@ class LesionSegmentationDataset(torch.utils.data.Dataset):
       subjects (set[str]): Names of the subjects in the dataset.
       num_classes (int): Number of classes in the dataset.
       subject_id_for_idx (List[str]): The subject name for each image in the dataset.
-      ita_angles (List[float]): The ITA angle for each image in the dataset.
       file_names (List[str]): The file name for each image in the dataset.
-      classes (List[int]): The class for each image in the dataset.
-      skin_colors (List[[int, int, int]]): The RGB skin color for each image in the dataset.
+      skin_colors (List[int]): The Fitzpatrick type label of each image (12, 34 or 56).
   """
   def __init__(self, 
                subset: Literal['train', 'valid', 'test', 'all'], 
@@ -92,7 +91,7 @@ class LesionSegmentationDataset(torch.utils.data.Dataset):
                skin_color_detection_method: Literal['knn', 'nn', 'cc']='knn'):
     self.dataset_folder = dataset_folder
     self.colorspace = colorspace
-    self.num_classes = 6
+    self.num_classes = 3
     self.augment = augment
     self.augment_skin_color = augment_skin_color
     self.stratified_sample_skin_color_augmentation = stratified_sample_skin_color_augmentation
@@ -116,59 +115,38 @@ class LesionSegmentationDataset(torch.utils.data.Dataset):
     self.subject_id_for_idx = [self._get_subject_from_file_name(f) for f in self.file_names]
     self.subjects = subjects if subjects is not None else set(self.subject_id_for_idx)
 
-    file_dir = os.path.dirname(os.path.realpath(__file__))
-    self.skin_colors_df = pd.read_csv(p.join(file_dir, 'dominant_colors.csv')) # TODO: Make this dataset-dependent
-    self.skin_colors_df['image'] = self.skin_colors_df['image'].str.replace('.jpg', '')
-    self.skin_colors_df.set_index('image', inplace=True)
-    self.skin_colors = [self.skin_colors_df.loc[s][['R', 'G', 'B']].astype(np.uint8).values for s in self.subject_id_for_idx]
-
-    self.ita_angles = [pre.get_ita_angle(c) for c in self.skin_colors]
-    self.classes = [self.class_for_ita_angle(ita) for ita in self.ita_angles]
+    file_dir = Path(p.dirname(__file__))
+    skin_color_csv_file = f'skin_colors_{skin_color_detection_method}.csv'
+    self.skin_colors_df = pd.read_csv(file_dir / self.dataset_folder / skin_color_csv_file)
+    # TODO: Check the following line
+    self.skin_colors_df['file_name'] = self.skin_colors_df['file_name'].str.replace('.jpg', '')
+    self.skin_colors_df.set_index('file_name', inplace=True)
+    self.skin_colors = [self.skin_colors_df.loc[s]['label'] for s in self.subject_id_for_idx]
 
     if classes is not None:
-      new_idxs = [idx for idx, c in enumerate(self.classes) if c in classes]
+      new_idxs = [idx for idx, c in enumerate(self.skin_colors) if c in classes]
       self.file_names = [self.file_names[idx] for idx in new_idxs]
       self.subject_id_for_idx = [self.subject_id_for_idx[idx] for idx in new_idxs]
       self.skin_colors = [self.skin_colors[idx] for idx in new_idxs]
-      self.ita_angles = [self.ita_angles[idx] for idx in new_idxs]
-      self.classes = [self.classes[idx] for idx in new_idxs]
-  
-  def class_for_ita_angle(self, ita_angle):
-    """
-    Returns the class label for the given ITA angle based on standard ITA ranges:
-      <-30: 0 - Dark
-      -30 to 10: 1 - Brown
-      10 to 28: 2 - Tan
-      28 to 41: 3 - Intermediate
-      41 to 55: 4 - Light
-      >55: 5 - Very light
-    """
-    # TODO: Refactor this to match Fitzpatrick-17 dataset
-    range_limits = [-30, 10, 28, 41, 55]
-    for i in range(len(range_limits)):
-      if ita_angle < range_limits[i]:
-        return i
-    return len(range_limits)
-  
+    
   def random_skin_color(self, stratified=False):
     def b_center(ita):
       # b_center is 0 for ita = +- 90 and 20 for ita = 50
       return 20 * np.cos(ita * np.pi / 180)
 
-    # TODO: Refactor this to match Fitzpatrick-17 dataset
+    # Based on Kinyanjui el al. Estimating Skin Tone and Effects
+    # on Classification Performance in Dermatology Datasets.
+    # https://arxiv.org/abs/1910.13268
     ita_range_for_class = [
-      (-90, -30),
-      (-30, 10),
-      (10, 28),
-      (28, 41),
-      (41, 55),
-      (55, 90)
+      (41, 90),   # 12
+      (19, 41),   # 34
+      (-90, 19)   # 56
     ]
 
     if stratified:
       class_probs = np.zeros(self.num_classes)
       for c in range(self.num_classes):
-        sum = np.sum(self.classes == c)
+        sum = np.sum(self.skin_colors == c)
         if sum == 0:
           class_probs[c] = 1
         else:
@@ -223,26 +201,26 @@ class LesionSegmentationDataset(torch.utils.data.Dataset):
 
     if self.colorspace == 'lab':
       input = cv.cvtColor(input, cv.COLOR_BGR2LAB)
-
     elif self.colorspace == 'rgb':
       input = cv.cvtColor(input, cv.COLOR_BGR2RGB)
-    
     elif self.colorspace == 'dist':
+      # TODO: Remove dist if not used
       input = cv.cvtColor(input, cv.COLOR_BGR2RGB)
-      skin_color = self.skin_colors[idx]
+      _, _, skin_color = pre.shade_of_gray_cc(input, power=6, gamma=1.2)
       if augmentation is not None:
         aug = np.random.normal(0, 10, 3)
         aug = np.round(aug).astype(int)
         skin_color = skin_color.astype(int) + aug
         skin_color = skin_color.astype(np.uint8)
       input = pre.dist_img(input, skin_color)
-    
     elif self.colorspace == 'white':
       input = cv.cvtColor(input, cv.COLOR_BGR2RGB)
+      # first use color constancy to remove skin color
       input, _, _ = pre.shade_of_gray_cc(input, power=6, gamma=1.2)
       if self.augment_skin_color:
         color = self.random_skin_color(stratified=self.stratified_sample_skin_color_augmentation)
         illuminant = pre.illuminant_from_color(color)
+        # then tint the image given a different random skin color
         input = input / illuminant
       input = np.clip(input, 0, 255)
       input = input.astype(np.uint8)
@@ -277,8 +255,7 @@ class LesionSegmentationDataset(torch.utils.data.Dataset):
     label_tensor = label_tensor.unsqueeze(0).float()
 
     class_label = self.classes[idx]
-    class_label_tensor = torch.zeros(self.num_classes)
-    class_label_tensor[class_label] = 1
+    class_label_tensor = torch.tensor(class_label).long()
 
     #plt.imshow(input.transpose(1, 2, 0))
     #plt.show()
