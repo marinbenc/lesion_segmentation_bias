@@ -9,25 +9,6 @@ from skimage.exposure import equalize_adapthist
 # color.lab2rgb() warns when values are clipped, but that is not a problem here
 warnings.filterwarnings('ignore', message='.*values that have been clipped.*', append=True)
 
-def dull_razor(img):
-    """
-    Applies the DullRazor algorithm to the image.
-
-    Args:
-    img: RGB numpy array of shape (H, W, C) between 0 and 255.
-    """
-    grayscale = cv.cvtColor(img, cv.COLOR_RGB2GRAY)
-    kernel = cv.getStructuringElement(1, (3,3))
-    blackhat = cv.morphologyEx(grayscale, cv.MORPH_BLACKHAT, kernel)
-    blurred = cv.GaussianBlur(blackhat, (3,3), cv.BORDER_DEFAULT)
-    _, hair_mask = cv.threshold(blurred, 10, 255, cv.THRESH_BINARY)
-    result = cv.inpaint(img, hair_mask, 6, cv.INPAINT_TELEA)
-    return result
-
-def get_ita_angle(color_rgb):
-  color_lab = cv.cvtColor(np.uint8([[color_rgb]]), cv.COLOR_RGB2LAB)[0][0]
-  return np.arctan((color_lab[0] - 50) / color_lab[2]) * 180 / np.pi
-
 def equalize_hist(img, white_point_color):
     #white_point_color_norm = white_point_color / np.linalg.norm(white_point_color)
     #white_point_color_norm *= 255

@@ -38,7 +38,8 @@ def save_files(files, folder):
 
 wd = Path(os.path.dirname(os.path.realpath(__file__)))
 
-dataset_groups = ['isic', 'dermis', 'dermquest']
+#dataset_groups = ['isic', 'dermis', 'dermquest']
+dataset_groups = ['ph2']
 for group in dataset_groups:
   os.makedirs(wd/group, exist_ok=True)
 
@@ -67,6 +68,10 @@ for group in dataset_groups:
     gts = [gt for gt in gts if subset_folder in gt or subset in gt]
 
     inputs = [f.replace('_contour.png', '_orig.jpg') for f in gts]
+
+  elif group == 'ph2':
+    inputs = glob(f'{wd}/downloaded_data/ph2/**/*_Dermoscopic_Image/*.bmp', recursive=True)
+    gts = [f.replace('_Dermoscopic_Image', '_lesion').replace('.bmp', '_lesion.bmp') for f in inputs]
   
   # split same as in Double U-Net paper: https://arxiv.org/pdf/2006.04868v2.pdf
   train_valid_test_split = (0.8, 0.1, 0.1)

@@ -26,12 +26,6 @@ from sklearn.metrics import (roc_auc_score, roc_curve, precision_recall_curve, a
 
 device = 'cuda'
 
-def get_checkpoint(model_type, log_name, fold=0, data_percent=1.):
-  checkpoint = p.join('runs', log_name, model_type, f'fold{fold}', f'{model_type}_best_fold={fold}.pth')
-  print('Loading checkpoint from:', checkpoint)
-  checkpoint = torch.load(checkpoint, map_location=device)
-  return checkpoint
-
 def get_det_predictions(model, dataset, viz=True):
   xs = []
   ys = []
@@ -100,7 +94,7 @@ def get_seg_predictions(model, dataset, viz=True):
     for (data, target) in tqdm(loader):
       x_np = data.squeeze(1).detach().cpu().numpy()
       y_np = target['seg'].squeeze(1).detach().cpu().numpy()
-      y_np = [utils._thresh(y) for y in y_np]
+      y_np = [utils.thresh(y) for y in y_np]
       ys += y_np
 
       xs += [x for x in x_np]
@@ -109,7 +103,7 @@ def get_seg_predictions(model, dataset, viz=True):
       output = model.forward(data)
 
       output_np = output.squeeze(1).detach().cpu().numpy()
-      output_np = [utils._thresh(o) for o in output_np]
+      output_np = [utils.thresh(o) for o in output_np]
       ys_pred += [o for o in output_np]
 
       if viz and y_np[0].sum() > 5:
@@ -145,26 +139,41 @@ def calculate_metrics(ys_pred, ys, metrics, subjects=None):
   
   return df
 
-def test(model_type, dataset, log_name, dataset_folder='valid', save_predictions=False, viz=False, label_encoding='ordinal-2d'):
-    data_split = p.join(p.join('runs', log_name, 'subjects.json'))
-    with open(data_split, 'r') as f:
-      json_dict = json.load(f)
-      splits = zip(json_dict['train_subjects'], json_dict['valid_subjects'])
+def test(model_type, dataset, log_name, dataset_folder=None, save_predictions=False, viz=False, label_encoding='ordinal-2d'):
+    ys, ys_pred, subject_ids = [], [], []
 
-    ys, ys_pred = [], []
+    datasets = []
+    if dataset_folder is None:
+      data_split = p.join(p.join('runs', log_name, 'subjects.json'))
+      with open(data_split, 'r') as f:
+        json_dict = json.load(f)
+        splits = zip(json_dict['train_subjects'], json_dict['valid_subjects'])
 
-    for fold, split in enumerate(splits):
-      valid_subjects = split[1]
+      for fold, split in enumerate(splits):
+        valid_subjects = split[1]
+        dataset_args = {
+          'subset': 'all',
+          'augment': False,
+          'colorspace': 'rgb',
+          # TODO: Use saved command line arguments / config file saved in train.py
+        }
+
+        if model_type == 'skin_detection':
+          dataset_args['label_encoding'] = label_encoding
+
+        test_dataset = data.get_dataset_class(dataset)(**dataset_args, subjects=valid_subjects)
+        datasets.append(test_dataset)
+    else:
       dataset_args = {
-        'subset': 'all',
+        'subset': dataset_folder,
         'augment': False,
         'colorspace': 'rgb',
-        'label_encoding': label_encoding,
-        # TODO: Use saved command line arguments / config file saved in train.py
       }
 
-      test_dataset = data.get_dataset_class(dataset)(**dataset_args, subjects=valid_subjects)
+      test_dataset = data.get_dataset_class(dataset)(**dataset_args)
+      datasets.append(test_dataset)
 
+    for fold, test_dataset in enumerate(datasets):
       if model_type == 'skin_detection':
           model = models.get_detection_model(test_dataset, device)
       elif model_type == 'lesion_seg':
@@ -172,15 +181,17 @@ def test(model_type, dataset, log_name, dataset_folder='valid', save_predictions
       else:
           raise ValueError(f'Unknown model type: {model_type}')
 
-      checkpoint = get_checkpoint(model_type, log_name, fold)
+      checkpoint = models.get_checkpoint(model_type, log_name, fold)
       model.load_state_dict(checkpoint['model'])
 
       os.makedirs(p.join('predictions', log_name), exist_ok=True)
 
       if model_type == 'skin_detection':
           xs, ys_fold, ys_pred_fold = get_det_predictions(model, test_dataset, viz=viz)
+          subject_ids_fold = []
       elif model_type == 'lesion_seg': 
           xs, ys_fold, ys_pred_fold = get_seg_predictions(model, test_dataset, viz=viz)
+          subject_ids_fold = test_dataset.subject_id_for_idx
 
           if save_predictions:
               for i in range(len(ys_pred_fold)):
@@ -190,38 +201,36 @@ def test(model_type, dataset, log_name, dataset_folder='valid', save_predictions
 
       ys += list(ys_fold)
       ys_pred += list(ys_pred_fold)
+      subject_ids += list(subject_ids_fold)
         
-    metrics_seg = {
+    metrics = {
         'dsc': utils.dsc,
         'hd': utils.housdorff_distance,
         'prec': utils.precision,
         'rec': utils.recall,
     }
 
-    metrics_det = {
-        'auc': roc_auc_score,
-        'ap': average_precision_score,
-        'f1': f1_score,
-        'acc': accuracy_score,
-    }
+    if model_type == 'lesion_seg':
+      metrics = {
+          'dsc': utils.dsc,
+          'hd': utils.housdorff_distance,
+          'assd': utils.assd,
+          'prec': utils.precision,
+          'rec': utils.recall,
+      }
 
-    metrics = metrics_seg if model_type == 'lesion_seg' else metrics_det
-    #df = calculate_metrics(ys, ys_pred, metrics, subjects=test_dataset.subject_id_for_idx)
+      df = calculate_metrics(ys, ys_pred, metrics, subjects=subject_ids)
 
-    #df.to_csv(p.join('predictions', log_name, 'metrics.csv'))
-    #if test_dataset.subject_id_for_idx is not None:
-    #  df = df.groupby('subject').mean()
+      df.to_csv(p.join(f'predictions', log_name, f'metrics_{dataset}.csv'))
+      print(df.describe())
+    else:
+      cm = confusion_matrix(ys, ys_pred)
+      print(cm)
 
-    #print(df.describe())
+      # balanced accuracy
+      print('balanced accuracy:', balanced_accuracy_score(ys, ys_pred))
 
-    cm = confusion_matrix(ys, ys_pred)
-    print(cm)
-
-    # balanced accuracy
-    print('balanced accuracy:', balanced_accuracy_score(ys, ys_pred))
-
-    print(classification_report(ys, ys_pred, target_names=['12', '34', '56']))
-    #return df
+      print(classification_report(ys, ys_pred, target_names=['12', '34', '56']))
 
 if __name__ == '__main__':
     fire.Fire(test)

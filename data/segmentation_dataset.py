@@ -34,9 +34,7 @@ class LesionSegmentationDataset(torch.utils.data.Dataset):
     dataset_folder (str): The folder containing the images and labels. The directory must be in the same directory as this file. 
     Expected folder structure:
       dataset_folder
-      ├── skin_colors_knn.csv (dominant colors for each image based on k-nearest neighbors)
-      ├── skin_colors_nn.csv (dominant colors for each image based on neural network)
-      ├── skin_colors_cc.csv (dominant colors for each image based on color constancy, see included examples for format)
+      ├── skin_color_prediction.csv (Fitzpatrick skin type for each image, see included examples for format)
       ├── train
       │   ├── input
       │   │   ├── <subject_name 0>.png
@@ -88,7 +86,7 @@ class LesionSegmentationDataset(torch.utils.data.Dataset):
                classes: Optional[List[int]] = None,
                augment_skin_color: bool = False,
                stratified_sample_skin_color_augmentation: bool = False,
-               skin_color_detection_method: Literal['knn', 'nn', 'cc']='knn'):
+               skin_color_detection_method: Literal['knn', 'nn', 'cc']='knn'): # TODO: Maybe remove cc?
     self.dataset_folder = dataset_folder
     self.colorspace = colorspace
     self.num_classes = 3
@@ -116,12 +114,12 @@ class LesionSegmentationDataset(torch.utils.data.Dataset):
     self.subjects = subjects if subjects is not None else set(self.subject_id_for_idx)
 
     file_dir = Path(p.dirname(__file__))
-    skin_color_csv_file = f'skin_colors_{skin_color_detection_method}.csv'
-    self.skin_colors_df = pd.read_csv(file_dir / self.dataset_folder / skin_color_csv_file)
+    skin_color_csv_file = f'skin_color_prediction.csv'
+    self.skin_colors_df = pd.read_csv(file_dir / self.dataset_folder / skin_color_csv_file, dtype={'file_name': str, 'skin_type': int})
     # TODO: Check the following line
     self.skin_colors_df['file_name'] = self.skin_colors_df['file_name'].str.replace('.jpg', '')
     self.skin_colors_df.set_index('file_name', inplace=True)
-    self.skin_colors = [self.skin_colors_df.loc[s]['label'] for s in self.subject_id_for_idx]
+    self.skin_colors = [self.skin_colors_df.loc[s]['skin_type'] for s in self.subject_id_for_idx]
 
     if classes is not None:
       new_idxs = [idx for idx, c in enumerate(self.skin_colors) if c in classes]
@@ -145,8 +143,9 @@ class LesionSegmentationDataset(torch.utils.data.Dataset):
 
     if stratified:
       class_probs = np.zeros(self.num_classes)
+      class_labels = [12, 34, 56]
       for c in range(self.num_classes):
-        sum = np.sum(self.skin_colors == c)
+        sum = np.sum(self.skin_colors == class_labels[c])
         if sum == 0:
           class_probs[c] = 1
         else:
@@ -254,12 +253,16 @@ class LesionSegmentationDataset(torch.utils.data.Dataset):
     input_tensor = input_tensor.float()
     label_tensor = label_tensor.unsqueeze(0).float()
 
-    class_label = self.classes[idx]
+    class_label = self.skin_colors[idx]
+    if class_label == 12:
+      class_label = 0
+    elif class_label == 34:
+      class_label = 1
+    elif class_label == 56:
+      class_label = 2
     class_label_tensor = torch.tensor(class_label).long()
 
     #plt.imshow(input.transpose(1, 2, 0))
-    #plt.show()
-    #plt.imshow(input.transpose(1, 2, 0)[:,:,[3,4,5]])
     #plt.show()
 
     return input_tensor, {'seg': label_tensor, 'aux': class_label_tensor}

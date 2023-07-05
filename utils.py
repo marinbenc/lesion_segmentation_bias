@@ -2,7 +2,7 @@ import cv2 as cv
 import numpy as np
 from medpy.metric.binary import precision as mp_precision
 from medpy.metric.binary import recall as mp_recall
-from medpy.metric.binary import dc, hd
+from medpy.metric.binary import dc, hd, assd as mp_assd
 import matplotlib.pyplot as plt
 
 def thresh(img):
@@ -30,6 +30,15 @@ def housdorff_distance(y_pred, y_true):
   score = hd(y_pred, y_true)
   return score
 
+def assd(y_pred, y_true):
+  y_pred = thresh(y_pred)
+  y_true = thresh(y_true)
+
+  if not np.any(y_true):
+    return 0 if np.any(y_pred) else 1
+
+  score = mp_assd(y_pred, y_true)
+  return score
 
 def iou(y_pred, y_true):
   y_pred = thresh(y_pred)

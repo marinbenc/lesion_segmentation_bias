@@ -42,9 +42,9 @@ def get_model(
 
     checkpoint = None
     if pretrained_model is not None:
-        pretrained_dir = '/'.join(log_dir.split('/')[2:])
-        pretrained_dir = p.join('runs', pretrained_model, pretrained_dir)
-        checkpoint = p.join(pretrained_dir, f'{model_type}_best_fold={fold}.pth')
+        pretrained_dir = p.join('runs', pretrained_model, model_type, f'fold0')
+        # take the 0th fold for pre-training
+        checkpoint = p.join(pretrained_dir, f'{model_type}_best_fold=0.pth')
         print('Loading checkpoint from:', checkpoint)
     
     if model_type == 'lesion_seg':
@@ -105,7 +105,6 @@ def train(*,
         'subset': 'valid',
         'augment': True,
         'colorspace': colorspace,
-        'label_encoding': label_encoding,
     }
 
     dataset_args_train = {
@@ -129,10 +128,20 @@ def train(*,
             **dataset_args_train,
             'augment_skin_color': augment_skin_color
         }
+    else:
+        dataset_args_valid = {
+            **dataset_args_valid,
+            'label_encoding': label_encoding,
+        }
+
+        dataset_args_train = {
+            **dataset_args_train,
+            'label_encoding': label_encoding,
+        }
 
     dataset_class = data.get_dataset_class(dataset)
 
-    if folds == 0:
+    if folds == 0: # TODO: Remove this
         train_dataset = dataset_class(**dataset_args_train)
         valid_dataset = dataset_class(**dataset_args_valid)
         datasets.append((train_dataset, valid_dataset))
@@ -173,8 +182,12 @@ def train(*,
             train_dataset = dataset_class(**whole_args_train, subjects=train_ids)
             valid_dataset = dataset_class(**whole_args_valid, subjects=valid_ids)
             # check for data leakage
-            intersection = set(train_dataset.labels_df['file_name'].values).intersection(set(valid_dataset.labels_df['file_name'].values))
-            assert len(intersection) == 0, f'Found {len(intersection)} overlapping files in fold {fold}'
+            if model_type == 'lesion_seg':
+                intersection = set(train_dataset.subjects).intersection(set(valid_dataset.subjects))
+                assert len(intersection) == 0, f'Found {len(intersection)} overlapping subjects in fold {fold}'
+            else:
+                intersection = set(train_dataset.labels_df['file_name'].values).intersection(set(valid_dataset.labels_df['file_name'].values))
+                assert len(intersection) == 0, f'Found {len(intersection)} overlapping files in fold {fold}'
             datasets.append((train_dataset, valid_dataset))
     
     os.makedirs(name=f'runs/{log_name}/{model_type}', exist_ok=True)
@@ -220,6 +233,8 @@ def train(*,
                 classes = train_dataset.all_classes
                 labels = train_dataset.labels_df['label'].values
                 class_weights = torch.tensor([1 / (labels == c).sum() for c in classes]).float().to(device)
+                class_weights = class_weights / class_weights.sum()
+                print(f'Using class weights: {class_weights}')
                 loss = nn.CrossEntropyLoss(weight=class_weights)
             else:
                 raise ValueError(f'Unknown label encoding: {train_dataset.label_encoding}')

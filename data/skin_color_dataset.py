@@ -55,6 +55,8 @@ class SkinColorDetectionDataset(torch.utils.data.Dataset):
       A list of classes (12, 34, 56) to use. If None, all classes are used. Useful for training only on a subset of the classes.
     label_encoding ('class', 'ordinal-2d' or 'ordinal-1d'):
       The label encoding to use. 'class' is [0, 1, 2], 'ordinal-2d' is [[1,0,0], [1,1,0], [1,1,1]], and 'ordinal-1d' is [1/6, 3/6, 5/6]
+    prediction (bool):
+      Whether to use the dataset for prediction. If True, the labels are not loaded.
 
     Attributes:
       subjects (set[str]): Names of the subjects in the dataset.
@@ -67,14 +69,15 @@ class SkinColorDetectionDataset(torch.utils.data.Dataset):
                subjects: Optional[List[str]] = None, 
                augment = False, 
                colorspace: Literal['lab', 'rgb']='lab', 
-               classes: List[int] = [12, 34, 56],
-               label_encoding: Literal['class', 'ordinal-2d', 'ordinal-1d'] = 'ordinal-1d'):
+               label_encoding: Literal['class', 'ordinal-2d', 'ordinal-1d'] = 'ordinal-1d',
+               prediction: bool = False):
     self.dataset_folder = dataset_folder
     self.colorspace = colorspace
     self.all_classes = [12, 34, 56]
     self.augment = augment
     self.model_transforms = ResNet18_Weights.DEFAULT.transforms()
     self.label_encoding = label_encoding
+    self.prediction = prediction
 
     assert self.colorspace in ['lab', 'rgb']
 
@@ -89,31 +92,34 @@ class SkinColorDetectionDataset(torch.utils.data.Dataset):
     file_paths = np.array(self._get_files(directories))
     file_subjects = [self._get_subject_from_file_name(f) for f in file_paths]
     
-    this_file_dir = p.dirname(__file__)
-    self.labels_df = pd.read_csv(
-      p.join(this_file_dir, self.dataset_folder, 'labels.csv'), 
-      dtype={'label': int, 'file_name': str})
-    # Keep only the subjects that are in directories
-    self.labels_df = self.labels_df[self.labels_df['file_name'].isin(file_subjects)]
+    if prediction:
+      self.labels_df = pd.DataFrame({'file_name': file_subjects, 'file_path': file_paths})
+    else:
+      this_file_dir = p.dirname(__file__)
+      self.labels_df = pd.read_csv(
+        p.join(this_file_dir, self.dataset_folder, 'labels.csv'), 
+        dtype={'label': int, 'file_name': str})
+      # Keep only the subjects that are in directories
+      self.labels_df = self.labels_df[self.labels_df['file_name'].isin(file_subjects)]
 
-    # Append the file paths to the labels dataframe
-    df_subject_names = self.labels_df['file_name'].to_numpy()
-    for i, subject_name in enumerate(df_subject_names):
-        file_path = file_paths[file_subjects.index(subject_name)]
-        self.labels_df.at[i, 'file_path'] = file_path
+      # Append the file paths to the labels dataframe
+      df_subject_names = self.labels_df['file_name'].to_numpy()
+      for i, subject_name in enumerate(df_subject_names):
+          file_path = file_paths[file_subjects.index(subject_name)]
+          self.labels_df.at[i, 'file_path'] = file_path
 
-    labels_remapping = {
-        1: 12,
-        2: 12,
-        3: 34,
-        4: 34,
-        5: 56,
-        6: 56
-    }
+      labels_remapping = {
+          1: 12,
+          2: 12,
+          3: 34,
+          4: 34,
+          5: 56,
+          6: 56
+      }
 
-    # Remap the labels to the classes
-    if self.labels_df.iloc[0]['label'] in [1, 2, 3, 4, 5, 6]:
-        self.labels_df['label'] = self.labels_df['label'].map(labels_remapping)
+      # Remap the labels to the classes
+      if self.labels_df.iloc[0]['label'] in [1, 2, 3, 4, 5, 6]:
+          self.labels_df['label'] = self.labels_df['label'].map(labels_remapping)
 
     if subjects is not None:
         # TODO: Check if this is working
@@ -122,18 +128,14 @@ class SkinColorDetectionDataset(torch.utils.data.Dataset):
 
     self.subjects = self.labels_df['file_name'].to_numpy()
     self.subject_id_for_idx = self.subjects
-
     self.labels_df = self.labels_df.dropna()
-
-    #plt.hist(self.labels_df['label'], bins=3)
-    #plt.show()
-
-    # TODO: classes is not used here
     
   def _get_files(self, directories):
     file_names = []
     for directory in directories:
       directory = p.join(p.dirname(__file__), self.dataset_folder, directory)
+      if self.prediction and p.exists(p.join(directory, 'input')):
+        directory = p.join(directory, 'input')
       directory_files = os.listdir(directory)
       directory_files = [p.join(directory, f) for f in directory_files]
       directory_files.sort()
@@ -251,8 +253,14 @@ class SkinColorDetectionDataset(torch.utils.data.Dataset):
     input_tensor[1] = (input_tensor[1] - 0.456) / 0.224
     input_tensor[2] = (input_tensor[2] - 0.406) / 0.225
     # crop to 224x224
-    input_tensor = input_tensor[:, 16:240, 16:240]
+    if self.prediction:
+      input_tensor = torch.functional.F.interpolate(input_tensor.unsqueeze(0), size=(224, 224), mode='bilinear', align_corners=False)[0]
+    else:
+      input_tensor = input_tensor[:, 16:240, 16:240]
 
+    if self.prediction:
+      return input_tensor
+    
     class_tensor = self.get_class_tensor(idx)    
     # plt.imshow(input.transpose(1, 2, 0) / 255.0)
     # file_name = self.labels_df.iloc[idx]['file_name']
