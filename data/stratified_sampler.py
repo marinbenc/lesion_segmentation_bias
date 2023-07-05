@@ -9,21 +9,19 @@ def StratifiedSampler(dataset: SkinColorDetectionDataset):
   """
   Returns a stratified sampler for the dataset. The weights are based on the distribution of the ita_angle attribute in the dataset.
   """
-  classes = dataset.all_classes
-  labels_key = 'label_diag' if isinstance(dataset, SkinDiagnosisDataset) else 'label'
-  labels = dataset.labels_df[labels_key].to_numpy()
+  label_per_sample = dataset.skin_colors
+  classes = np.unique(label_per_sample)
+  classes.sort()
 
-  class_counts = np.zeros(len(classes))
-  for i, class_name in enumerate(classes):
-    class_counts[i] = np.sum(labels == class_name)
+  class_to_idx = {classes[i]: i for i in range(len(classes))}
 
-  weights = 1 / class_counts
-  weights = weights / np.sum(weights)
+  class_sample_count = np.array([len(np.where(label_per_sample == t)[0]) for t in classes])
+  weight = 1. / class_sample_count
 
-  sample_weights = np.zeros(len(labels))
-  for i, label in enumerate(labels):
-    sample_weights[i] = weights[classes.index(label)]
+  print('Stratified sampling weights:')
+  print(list(zip(classes, weight)))
 
-  print(weights)
-  sampler = WeightedRandomSampler(list(sample_weights), len(sample_weights) * 2, replacement=True)
+  class_idx_per_sample = np.array([class_to_idx[c] for c in label_per_sample])
+  samples_weight = np.array([weight[t] for t in class_idx_per_sample])
+  sampler = WeightedRandomSampler(list(samples_weight), len(samples_weight) * 2, replacement=True)
   return sampler
