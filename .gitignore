@@ -1,6 +1,5 @@
 data/**/*
 !data/**/*.py
-predictions/
 runs/
 sam_checkpoints/
 

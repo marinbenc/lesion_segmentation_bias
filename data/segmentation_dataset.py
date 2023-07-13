@@ -25,6 +25,12 @@ def LesionSegDatasetDermQuest(subset, **kwargs):
 def LesionSegDatasetDermis(subset, **kwargs):
   return LesionSegmentationDataset(subset=subset, dataset_folder='dermis', **kwargs)
 
+def LesionSegDatasetPH2(subset, **kwargs):
+  return LesionSegmentationDataset(subset=subset, dataset_folder='ph2', **kwargs)
+
+def LesionSegDatasetDermofit(subset, **kwargs):
+  return LesionSegmentationDataset(subset=subset, dataset_folder='dermofit', **kwargs)
+
 class LesionSegmentationDataset(torch.utils.data.Dataset):
   """
   A dataset for segmenting skin lesions.
@@ -85,8 +91,7 @@ class LesionSegmentationDataset(torch.utils.data.Dataset):
                colorspace: Literal['lab', 'rgb', 'dist', 'white']='lab', 
                classes: Optional[List[int]] = None,
                augment_skin_color: bool = False,
-               stratified_sample_skin_color_augmentation: bool = False,
-               skin_color_detection_method: Literal['knn', 'nn', 'cc']='knn'): # TODO: Maybe remove cc?
+               stratified_sample_skin_color_augmentation: bool = False):
     self.dataset_folder = dataset_folder
     self.colorspace = colorspace
     self.num_classes = 3
@@ -115,11 +120,11 @@ class LesionSegmentationDataset(torch.utils.data.Dataset):
 
     file_dir = Path(p.dirname(__file__))
     skin_color_csv_file = f'skin_color_prediction.csv'
-    self.skin_colors_df = pd.read_csv(file_dir / self.dataset_folder / skin_color_csv_file, dtype={'file_name': str, 'skin_type': int})
+    self.skin_colors_df = pd.read_csv(file_dir / self.dataset_folder / skin_color_csv_file, dtype={'file_name': str, 'nn_skin_type': int})
     # TODO: Check the following line
     self.skin_colors_df['file_name'] = self.skin_colors_df['file_name'].str.replace('.jpg', '')
     self.skin_colors_df.set_index('file_name', inplace=True)
-    self.skin_colors = [self.skin_colors_df.loc[s]['skin_type'] for s in self.subject_id_for_idx]
+    self.skin_colors = [self.skin_colors_df.loc[s]['nn_skin_type'] for s in self.subject_id_for_idx]
 
     if classes is not None:
       new_idxs = [idx for idx, c in enumerate(self.skin_colors) if c in classes]

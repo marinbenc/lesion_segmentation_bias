@@ -27,6 +27,9 @@ def save_files(files, folder):
     file_name = input_file.split('/')[-1]
     input_destination = os.path.join(folder, 'input', file_name)
     gt_destionation = os.path.join(folder, 'label', file_name.replace('.jpg', '.png'))
+    gt_destionation = os.path.join(folder, 'label', file_name.replace('.bmp', '.png'))
+    input_destination = input_destination.replace('.png', '.jpg') # always save as jpg
+    input_destination = input_destination.replace('.bmp', '.jpg')
 
     input_img = cv.imread(input_file)
     gt_img = cv.imread(gt_file, cv.IMREAD_GRAYSCALE)
@@ -38,25 +41,29 @@ def save_files(files, folder):
 
 wd = Path(os.path.dirname(os.path.realpath(__file__)))
 
-#dataset_groups = ['isic', 'dermis', 'dermquest']
-dataset_groups = ['ph2']
+#dataset_groups = ['isic', 'dermis', 'dermquest', 'ph2', 'dermofit']
+dataset_groups = ['isic']
 for group in dataset_groups:
   os.makedirs(wd/group, exist_ok=True)
 
   if group == 'isic':
     VALID_INPUT_FOLDER = 'downloaded_data/isic/ISIC2018_Task1-2_Validation_Input'
     TRAIN_INPUT_FOLDER = 'downloaded_data/isic/ISIC2018_Task1-2_Training_Input'
+    TEST_INPUT_FOLDER = 'downloaded_data/isic/ISIC2018_Task1-2_Test_Input'
+    TEST_GT_FOLDER = 'downloaded_data/isic/ISIC2018_Task1_Test_GroundTruth'
     VALID_GT_FOLDER = 'downloaded_data/isic/ISIC2018_Task1_Validation_GroundTruth'
     TRAIN_GT_FOLDER = 'downloaded_data/isic/ISIC2018_Task1_Training_GroundTruth'
 
     valid_input = get_files(wd/VALID_INPUT_FOLDER)
     train_input = get_files(wd/TRAIN_INPUT_FOLDER)
+    test_input = get_files(wd/TEST_INPUT_FOLDER)
 
     valid_gt = get_files(wd/VALID_GT_FOLDER)
     train_gt = get_files(wd/TRAIN_GT_FOLDER)
+    test_gt = get_files(wd/TEST_GT_FOLDER)
 
-    inputs = valid_input + train_input
-    gts = valid_gt + train_gt
+    inputs = valid_input + train_input + test_input
+    gts = valid_gt + train_gt + test_gt
   
   elif group in ['dermis', 'dermquest']:
     subset = group.split('_')[-1]
@@ -72,6 +79,10 @@ for group in dataset_groups:
   elif group == 'ph2':
     inputs = glob(f'{wd}/downloaded_data/ph2/**/*_Dermoscopic_Image/*.bmp', recursive=True)
     gts = [f.replace('_Dermoscopic_Image', '_lesion').replace('.bmp', '_lesion.bmp') for f in inputs]
+
+  elif group == 'dermofit':
+    gts = glob(f'{wd}/downloaded_data/dermofit/**/*mask.png', recursive=True)
+    inputs = [f.replace('mask', '') for f in gts]
   
   # split same as in Double U-Net paper: https://arxiv.org/pdf/2006.04868v2.pdf
   train_valid_test_split = (0.8, 0.1, 0.1)

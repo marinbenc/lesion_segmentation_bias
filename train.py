@@ -64,7 +64,6 @@ def train(*,
     dataset: DatasetType,
     colorspace: Literal['rgb', 'lab', 'white', 'dist'] = 'lab',
     augment_skin_color: bool = False,
-    skin_color_detection_method: Literal['knn', 'nn'] = 'knn',
     log_name: str, 
     device: str = 'cuda',
     folds: int = 1,
@@ -87,7 +86,6 @@ def train(*,
         augment_skin_color (bool): If True, will tint images during training.
         stratified_sample_skin_color_augmentation (bool): If True, will use stratified sampling to augment skin colors.
         colorspace ('lab', 'rgb', 'white' or 'dist'): The colorspace to use for the model. See paper for details on 'white' and 'dist'.
-        skin_color_detection_method ('knn' or 'nn'): Which CSV file to use for the skin colors. See data/segmentation_dataset.py for details.
         log_name (str): The name of the log directory. The model checkpoints are saved in runs/log-name/model-type.
         device (str): The device to train on.
         overwrite (bool): If True, the log_name directory is deleted before training.
@@ -121,7 +119,6 @@ def train(*,
             'colorspace': 'rgb' if colorspace == 'white' and augment_skin_color else colorspace,
             'augment_skin_color': False,
             'stratified_sample_skin_color_augmentation': stratified_sample_skin_color_augmentation,
-            'skin_color_detection_method': skin_color_detection_method
         }
 
         dataset_args_train = {
@@ -141,7 +138,7 @@ def train(*,
 
     dataset_class = data.get_dataset_class(dataset)
 
-    if folds == 0: # TODO: Remove this
+    if folds <= 1:
         train_dataset = dataset_class(**dataset_args_train)
         valid_dataset = dataset_class(**dataset_args_valid)
         datasets.append((train_dataset, valid_dataset))
