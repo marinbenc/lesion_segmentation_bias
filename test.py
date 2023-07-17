@@ -139,7 +139,7 @@ def calculate_metrics(ys_pred, ys, metrics, subjects=None):
   
   return df
 
-def test(model_type, dataset, log_name, dataset_folder=None, save_predictions=False, viz=False, label_encoding='ordinal-2d'):
+def test(model_type, dataset, log_name, dataset_folder=None, save_predictions=False, viz=False, label_encoding='ordinal-2d', colorspace='rgb'):
     ys, ys_pred, subject_ids = [], [], []
 
     datasets = []
@@ -154,7 +154,7 @@ def test(model_type, dataset, log_name, dataset_folder=None, save_predictions=Fa
         dataset_args = {
           'subset': 'all',
           'augment': False,
-          'colorspace': 'rgb',
+          'colorspace': colorspace,
           # TODO: Use saved command line arguments / config file saved in train.py
         }
 
@@ -167,7 +167,7 @@ def test(model_type, dataset, log_name, dataset_folder=None, save_predictions=Fa
       dataset_args = {
         'subset': dataset_folder,
         'augment': False,
-        'colorspace': 'rgb',
+        'colorspace': colorspace,
       }
 
       test_dataset = data.get_dataset_class(dataset)(**dataset_args)
