@@ -195,7 +195,8 @@ def test(model_type, dataset, log_name, dataset_folder=None, save_predictions=Fa
 
           if save_predictions:
               for i in range(len(ys_pred_fold)):
-                  cv.imwrite(p.join('predictions', log_name, f'{i}.png'), ys_pred_fold[i] * 255)
+                  file_name = test_dataset.file_names[i].split('/')[-1].replace('.jpg', '.png')
+                  cv.imwrite(p.join('predictions', log_name, file_name), ys_pred_fold[i] * 255)
       else:
           raise ValueError(f'Unknown model type: {model_type}')
 
