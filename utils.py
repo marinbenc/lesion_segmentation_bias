@@ -2,7 +2,7 @@ import cv2 as cv
 import numpy as np
 from medpy.metric.binary import precision as mp_precision
 from medpy.metric.binary import recall as mp_recall
-from medpy.metric.binary import dc, hd, assd as mp_assd
+from medpy.metric.binary import dc, hd, assd as mp_assd, asd
 import matplotlib.pyplot as plt
 
 def thresh(img):
@@ -37,8 +37,8 @@ def assd(y_pred, y_true):
   if not np.any(y_true):
     return 0 if np.any(y_pred) else 1
 
-  score = mp_assd(y_pred, y_true)
-  return score
+  assd = np.mean( (asd(y_pred, y_true, None, 1), asd(y_true, y_pred, None, 1)) )
+  return assd
 
 def iou(y_pred, y_true):
   y_pred = thresh(y_pred)
