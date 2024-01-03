@@ -67,7 +67,8 @@ def extract_skin(img: np.ndarray, label: Optional[np.ndarray] = None) -> np.ndar
   thresh = cv.dilate(thresh, kernel, iterations=5)
   thresh = cv.morphologyEx(thresh, cv.MORPH_CLOSE, kernel, iterations=5)
 
-  final_image = cv.bitwise_and(clahe_img, clahe_img, mask=255 - thresh)
+  thresh = cv.bitwise_or(thresh, hair_mask)
+  final_image = cv.bitwise_and(img, img, mask=255 - thresh)
   return final_image
 
 def get_hair_mask(img):
@@ -75,7 +76,7 @@ def get_hair_mask(img):
   kernel = cv.getStructuringElement(1, (3,3))
   blackhat = cv.morphologyEx(grayscale, cv.MORPH_BLACKHAT, kernel)
   blurred = cv.GaussianBlur(blackhat, (3,3), cv.BORDER_DEFAULT)
-  _, hair_mask = cv.threshold(blurred, 5, 255, cv.THRESH_BINARY)
+  _, hair_mask = cv.threshold(blurred, 25, 255, cv.THRESH_BINARY)
   return hair_mask
 
 def dull_razor(img):
