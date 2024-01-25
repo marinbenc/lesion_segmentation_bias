@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 import torch
 from skimage import color
+import matplotlib.pyplot as plt
 
 from torch.nn.functional import sigmoid
 
@@ -24,8 +25,6 @@ def _process_image_kmeans(file_path):
     img = cv.imread(file_path)
     if 'dermis' in file_path:
         img[-80:, -50:] = 0 # remove logo at bottom right corner
-        plt.imshow(img)
-        plt.show()
     label_path = file_path.replace('input', 'label').replace('.jpg', '.png')
     if p.exists(label_path):
         label = cv.imread(label_path, cv.IMREAD_GRAYSCALE)
